@@ -1,0 +1,302 @@
+\documentclass[aspectratio=169, 8pt]{beamer}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman,english]{babel}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\definecolor{arduinoorange}{rgb}{1.0, 0.4, 0.0}
+
+\lstdefinelanguage{Arduino}[]{C++}{
+	alsoletter={_},
+	morekeywords={uint8_t, uint16_t, uint32_t, int8_t, volatile, const, void, ISR, cli, sei},
+	keywords=[2]{TIMER1_COMPA_vect, TCCR1A, TCCR1B, OCR1A, TIMSK1, WGM12, CS12, CS10, OCIE1A, EEPROM},
+	sensitive=true
+}
+
+\lstset{
+	language=Arduino,
+	basicstyle=\ttfamily\tiny,
+	keywordstyle=\color{magenta},
+	keywordstyle=[2]\color{arduinoorange},
+	commentstyle=\color{codegreen},
+	stringstyle=\color{codepurple},
+	numberstyle=\tiny\color{codegray},
+	numbers=left,
+	numbersep=3pt,
+	breaklines=true,
+	showstringspaces=false,
+	frame=single,
+	tabsize=2
+}
+
+
+
+\title{Morse Code Transmitter}
+\author{Jokobus}
+	
+\begin{document}	
+
+\begin{frame}
+		\titlepage
+	\end{frame}
+
+	% Slide 1: Overview
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Project Overview}
+		\begin{itemize}
+			\item \textbf{Goal:} Visual Morse code transmitter with lighthouse effect
+			\item \textbf{Hardware:} Arduino Nano (ATmega328P) + WS2812B LED strip
+			\item \textbf{Key Features:}
+			\begin{itemize}
+				\item Interrupt-driven timing for precision and free main loop
+				\item Addressable RGB LEDs with wave animation
+				\item EEPROM state persistence to toggle messaging on/off via reset button
+			\end{itemize}
+			\item \textbf{Message:} Configurable string (default: \glqq IN\grqq)
+		\end{itemize}
+	\end{frame}
+		
+	% Slide 2: Hardware Architecture
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Hardware Architecture}
+		\vspace{0.5cm}
+		\begin{columns}
+			\column{0.4\textwidth}
+			\textbf{Arduino Nano (ATmega328P)}
+			\begin{itemize}
+				\item 16 MHz clock
+				\item 3x Hardware timers
+				\item 1 KB EEPROM
+				\item 32 KB Flash memory
+			\end{itemize}
+			
+			\vspace{0.5cm}
+			\textbf{Time Encoding}
+			\begin{itemize}
+				\item \textbf{Dot:} 500 ms
+				\item \textbf{Dash:} 1500 ms (3x dot duration)
+				\item \textbf{Intra-character gap:} 500 ms
+				\item \textbf{Inter-character gap:} 1500 ms
+				\item \textbf{Word gap:} 3500 ms (7x dot duration)
+				\item \textbf{Example: \glqq IN\grqq}
+				\begin{center}
+					\texttt{..  -.}\\
+					\vspace{0.1cm}
+					\small{(2 dots)(gap)(1 dash, 1 dot)}
+				\end{center}
+			\end{itemize}
+			
+			\vspace{0.5cm}
+			\textbf{WS2812B LED Strip}
+			\begin{itemize}
+				\item 8 addressable LEDs
+				\item 24-bit RGB color
+				\item 800 kHz data rate
+				\item Connected to Pin 6
+			\end{itemize}
+			
+			\column{0.55\textwidth}
+			\textbf{Setup}
+			\lstinputlisting[linerange={5-29}, firstnumber=5]{../morse.ino}
+			
+		\end{columns}
+	\end{frame}
+	
+	% Slide 3: Morse Lookup Table
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Character Encoding: Morse Lookup Table}
+		\vspace{0.5cm}
+		\lstinputlisting[linerange={47-87}, firstnumber = 47]{../morse.ino}
+	\end{frame}
+	
+	% Slide 4: Sequence Builder - Part 1
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Building the Sequence (1/2)}
+		\vspace{0.5cm}
+		\textbf{Data Structures:}
+		\lstinputlisting[linerange={31-36}, firstnumber=31]{../morse.ino}
+		
+		\textbf{Add Step Function:}
+		\lstinputlisting[linerange={98-105}, firstnumber=98]{../morse.ino}
+	\end{frame}
+	
+	% Slide 5: Sequence Builder - Part 2
+	\begin{frame}[fragile,shrink=10]
+		\vspace{0.5cm}
+		\frametitle{Building the Sequence (2/2)}
+		\lstinputlisting[linerange={115-157}, firstnumber=115]{../morse.ino}
+	\end{frame}
+	
+	% Slide 6: Lighthouse Wave Effect
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Lighthouse Wave Effect}
+		\begin{itemize}
+			\item \textbf{Concept:} Light sweeps across LED strip instead of all-on
+			\item \textbf{Implementation:}
+			\begin{itemize}
+				\item Divide dot/dash duration by number of LEDs (8)
+				\item Illuminate each LED sequentially
+				\item Create smooth sweeping motion
+			\end{itemize}
+			\item \textbf{Example:} 500 ms dot $\div$ 8 LEDs = 62.5 ms per LED
+			\item \textbf{Wave width:} Configurable (5 LEDs default)
+			\item \textbf{Boring:} Standard blinking is possible as well, by setting parameter $WAVE\_WIDTH = 0$
+		\end{itemize}
+		
+		\vspace{0.5cm}
+		\begin{center}
+			\texttt{LED: [1][2][3][4][5][6][7][8]}\\
+			\texttt{Time: →→→→→→→→}
+		\end{center}
+	\end{frame}
+	
+	% Slide 7: Timer1 Configuration
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Hardware Timer1 Setup}
+		\begin{itemize}
+			\item \textbf{Mode:} CTC (Clear Timer on Compare Match)
+			\item \textbf{Prescaler:} 1024
+			\item \textbf{Frequency:} 16 MHz / 1024 = 15625 Hz
+			\item \textbf{Resolution:} 64 $\mu$s per tick
+			\item[] \lstinputlisting[linerange={262-284}, firstnumber=262]{../morse.ino}    
+			\item \textbf{Calculation:} ticks = (duration\_ms × 15625) / 1000
+		\end{itemize}
+		
+	\end{frame}
+	
+	% Slide 8: Interrupt Service Routine
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Interrupt Service Routine (ISR)}
+		\vspace{0.5cm}
+		\lstinputlisting[linerange={169-205}, firstnumber=169]{../morse.ino}
+	\end{frame}
+	
+	% Slide 9: ISR Details
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{ISR Execution Details}
+		\textbf{Responsibilities:}
+		\begin{enumerate}
+			\item Update LED colors and positions
+			\item Handle wave effect logic with boundary checking
+			\item Transmit data to WS2812B strip (\texttt{show()})
+			\item Calculate next timer interval
+			\item Advance to next step (with wraparound)
+		\end{enumerate}
+		
+		\vspace{0.5cm}
+		\textbf{Timing Considerations:}
+		\begin{itemize}
+			\item WS2812B update: $\sim$ 240 $\mu s$ for 8 LEDs
+			\item Shortest Morse interval: 500 ms
+			\item Overhead: 0.05\% (negligible)
+		\end{itemize}
+	\end{frame}
+	
+	% Slide 10: EEPROM State Management
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{EEPROM State Management}
+		Electrically-Erasable Programmable Read-Only Memory
+		
+		\vspace{0.3cm}
+		\lstinputlisting[linerange={253-260}, firstnumber=253]{../morse.ino}
+		
+		\begin{itemize}
+			\item \textbf{Purpose:} Remember on/off state across power cycles
+			\item \textbf{Address 0:} Stores state (0=Stopped, 1=Playing)
+			\item \textbf{Write protection:} Only write if value changes
+			\item \textbf{Endurance:} $\sim$100,000 write cycles
+			\item \textbf{User interface:} Reset button toggles state
+		\end{itemize}
+	\end{frame}
+	
+	% Slide 11: Startup/Shutdown Sequences
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Visual Feedback Sequences}
+		\vspace{0.5cm}
+		\begin{columns}
+			\column{0.45\textwidth}
+			\textbf{Startup Sequence:}
+			\lstinputlisting[linerange={210-220}, firstnumber=210]{../morse.ino}
+			
+			\column{0.45\textwidth}
+			\textbf{Shutdown Sequence:}
+			\lstinputlisting[linerange={225-235}, firstnumber=225]{../morse.ino}
+		\end{columns}
+		
+		\vspace{0.3cm}
+		\begin{center}
+			Startup: Red → Green → Off → Transmit\\
+			Shutdown: Green → Red → Off
+		\end{center}
+	\end{frame}
+	
+	% Slide 12: Conclusion
+	\begin{frame}[fragile,shrink=10]
+		\frametitle{Conclusion}
+		\begin{itemize}
+			\item \textbf{Successfully implemented} interrupt-driven Morse code transmitter with lighthouse effect
+			\item[] \lstinputlisting[linerange={292-294}, firstnumber=292]{../morse.ino}
+			\item \textbf{Demonstrated concepts:}
+			\begin{itemize}
+				\item Hardware timer configuration (Timer1 CTC mode)
+				\item Interrupt service routines (ISR)
+				\item Non-volatile memory (EEPROM)
+				\item Addressable LED control (WS2812B protocol)
+			\end{itemize}
+		\end{itemize}
+		
+		\vspace{1cm}
+		\begin{center}
+			\Large{Thank you for your attention!}\\
+			\vspace{0.5cm}
+			\normalsize{Questions?}
+		\end{center}
+	\end{frame}
+	
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 1}
+		\lstinputlisting[linerange={0-40}, firstnumber=0]{../morse.ino}
+	\end{frame}
+
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 2}
+		\lstinputlisting[linerange={41-88}, firstnumber=41]{../morse.ino}
+	\end{frame}
+
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 3}
+		\lstinputlisting[linerange={89-131}, firstnumber=89]{../morse.ino}
+	\end{frame}
+
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 4}
+		\lstinputlisting[linerange={132-168}, firstnumber=132]{../morse.ino}
+	\end{frame}
+
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 5}
+		\lstinputlisting[linerange={169-206}, firstnumber=169]{../morse.ino}
+	\end{frame}
+
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 6}
+		\lstinputlisting[linerange={207-249}, firstnumber=207]{../morse.ino}
+	\end{frame}
+
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 7}
+		\lstinputlisting[linerange={250-286}, firstnumber=250]{../morse.ino}
+	\end{frame}
+
+	\begin{frame}[fragile, shrink=10]
+		\frametitle{Appendix: Full Code - Part 8}
+		\lstinputlisting[linerange={287-300}, firstnumber=287]{../morse.ino}
+	\end{frame}
+\end{document}

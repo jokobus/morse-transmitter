@@ -1,0 +1,485 @@
+\documentclass[report]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{listings}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\definecolor{arduinoorange}{rgb}{1.0, 0.4, 0.0}
+\definecolor{doxygenblue}{rgb}{0.0, 0.0, 1.0}
+\definecolor{functiongold}{rgb}{0.7, 0.5, 0.0}
+\definecolor{variableteal}{rgb}{0.0, 0.5, 0.6}
+
+\lstdefinelanguage{Arduino}[]{C++}{
+    alsoletter={_},
+    morekeywords={uint8_t, uint16_t, uint32_t, int8_t, int16_t, int32_t, bool, byte, volatile, const, void, char, if, else, for, while, switch, case, default, break, return, true, false},
+    keywords=[2]{setup, loop, pinMode, digitalWrite, digitalRead, analogRead, analogWrite, Serial, begin, print, println, delay, millis, micros, INPUT, OUTPUT, INPUT_PULLUP, HIGH, LOW, ISR, cli, sei, TCCR1A, TCCR1B, OCR1A, TIMSK1, TCNT1, CS12, CS10, WGM12, OCIE1A, TIMER1_COMPA_vect, EEPROM, read, write, Adafruit_NeoPixel, fill, show, Color},
+    keywords=[3]{morseCode, addStep, buildSequence},
+    keywords=[4]{LED_PIN, LED_COUNT, MESSAGE, led_strip, TICKS_PER_SECOND, MAX_STEPS, durations, states, stepCount, currentStep},
+    sensitive=true
+}
+
+\lstdefinestyle{cstyle}{
+    %backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    keywordstyle=[2]\color{arduinoorange},
+    keywordstyle=[3]\color{functiongold},
+    keywordstyle=[4]\color{variableteal},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2,
+    frame=single,
+    language=Arduino,
+    literate={@brief}{{\textcolor{doxygenblue}{@brief}}}6 
+             {@param}{{\textcolor{doxygenblue}{@param}}}6 
+             {@return}{{\textcolor{doxygenblue}{@return}}}7
+}
+
+\lstset{style=cstyle}
+
+\title{Morse Code Transmitter Project Report}
+
+\author{\IEEEauthorblockN{Jokobus} \\
+\IEEEauthorblockA{\textit{Github} \\
+\textit{Technical University of Github}\\
+Somewhere, Around \\
+}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report describes an interrupt-driven Morse code transmitter built with an Arduino Nano (ATmega328P) and a WS2812B LED strip. 
+The system converts text messages into Morse code and displays them using a lighthouse-style wave effect across the LEDs. 
+The implementation uses Timer1 hardware interrupts for precise timing, EEPROM for state persistence of button presses, and demonstrates key embedded systems concepts like interrupt service routines and timer configuration. 
+A major achievement is that the main loop is kept free of any code. 
+\end{abstract}
+
+\begin{IEEEkeywords}
+Embedded Systems, Arduino, Morse Code, WS2812B, Timer Interrupts, ATmega328P, EEPROM
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+\subsection{Background}
+Morse code was developed by Samuel Morse in the 1830s as one of the first digital communication methods. 
+It encodes text as sequences of dots (short signals) and dashes (long signals), which was perfect for telegraph systems. 
+While we have modern digital protocols now, Morse code is still used in amateur radio, aviation, and maritime communications. 
+It's also a great way to learn about digital signal processing and timing in embedded systems.
+
+\subsection{Project Motivation}
+The goal was to build a visual Morse code transmitter that goes beyond simple LED blinking. This project features:
+\begin{itemize}
+    \item Using interrupts for accurate timing to keep the main program loop free
+    \item Converting string messages to Morse code dynamically
+    \item Remembering the on/off state across power cycles
+    \item Controlling addressable RGB LEDs with precise timing
+\end{itemize}
+
+\subsection{System Overview}
+The system reads a predefined message string, converts it to Morse code, and displays it on an 8-LED WS2812B strip with an optional sweeping lighthouse effect. 
+The message loops continuously until manually stopped by pressing the reset button, which toggles between playing and stopped states. 
+The implementation prioritizes timing accuracy, code modularity, and visual appeal.
+
+\section{Hardware Architecture}
+
+\subsection{Microcontroller Selection}
+I chose the Arduino Nano with its ATmega328P microcontroller because it has:
+\begin{itemize}
+    \item A 16 MHz clock that gives enough timing resolution
+    \item Three hardware timers (Timer0, Timer1, Timer2) for generating precise interrupts
+    \item 1 KB EEPROM to store data when powered off
+    \item A compact size that's good for embedded projects
+    \item 32 KB flash memory, which is plenty for the program and Morse lookup tables
+    \item And most importantly: It was already in my drawer
+\end{itemize}
+
+The ATmega328P runs at 5V, which works well with most LED strips and can drive the data pin directly.
+
+\subsection{LED Strip Technology}
+The WS2812B LEDs are addressable RGB LEDs with a built-in driver chip in each LED. 
+This means you can control each LED's color individually. Important specs:
+\begin{itemize}
+    \item \textbf{Protocol}: Single-wire serial communication
+    \item \textbf{Color depth}: 24-bit RGB (8 bits per channel)
+    \item \textbf{Timing requirements}: Very precise pulse widths ($0.4\mu s$ and $0.8\mu s$)
+    \item \textbf{Data rate}: 800 kHz
+    \item \textbf{Cascading}: Data passes through from one LED to the next
+\end{itemize}
+
+The strip connects to digital pin 6. 
+Each LED draws about 60 mA at full white brightness, but I'm running them at just 1\% brightness (2.55/255) because the LEDs intensity is quite high -- especially if one looks directly into them by accident. 
+
+\subsection{Hardware Connections}
+The Arduino is mounted on a prototype shield (Nano expansion board) that provides convenient access to all pins which makes it easier to connect the LED strip without soldering directly to the Arduino pins. It also provides a more robust mounting solution and better access to power rails for future expansions.
+\begin{itemize}
+    \item \textbf{LED Data Pin}: Digital Pin 6 (PD6)
+    \item \textbf{Power Supply}: 5V from USB or external source
+    \item \textbf{Ground}: Common ground between Arduino and LED strip
+    \item \textbf{LED Count}: 8 individually addressable LEDs
+\end{itemize}
+
+The reset button on the Arduino Nano serves as the user interface for toggling the transmission state, demonstrating a minimalist approach to user interaction. Using an external button would have been a cleaner approach, but I don't have one. However, the EEPROM solution works quite well. 
+
+\section{Software Architecture}
+
+\subsection{System Design Philosophy}
+The software follows an interrupt-driven architecture where the main timing loop executes independently of the \texttt{loop()} function. This design ensures:
+\begin{itemize}
+    \item Timing accuracy unaffected by main loop execution time
+    \item Non-blocking operation allowing future feature additions
+    \item Deterministic behavior for real-time signal generation
+    \item Efficient CPU utilization
+\end{itemize}
+
+\subsection{Design Decisions}
+Here are some key decisions I made:
+
+\textbf{Why Timer1:}
+I chose Timer1 over the other timers because:
+\begin{itemize}
+    \item Timer0 is already used by Arduino's \texttt{delay()} and \texttt{millis()} functions
+    \item Timer1 is 16-bit, so it can handle longer time intervals easily
+    \item Timer2 is only 8-bit
+\end{itemize}
+
+\textbf{Using Interrupts:}
+Interrupts keep the timing accurate no matter what the main loop is doing. This means I could add features like serial communication later without messing up the Morse timing.
+
+\textbf{Lighthouse Effect:}
+The wave effect makes it look cooler than just blinking all LEDs on and off. It also shows more fine-grained control over the individual LEDs.
+
+\subsection{Morse Code Timing Standards}
+The timing follows standard Morse code ratios but with longer durations for better visual clarity:
+\begin{itemize}
+    \item \textbf{Dot}: 500 ms
+    \item \textbf{Dash}: 1500 ms (3× dot duration)
+    \item \textbf{Intra-character gap}: 500 ms (between dots/dashes)
+    \item \textbf{Inter-character gap}: 1500 ms (between letters)
+    \item \textbf{Word gap}: 3500 ms (between words)
+\end{itemize}
+
+I used 500 ms for dots instead of the typical 200 ms because faster flashing would be hard to see clearly. 
+The slower timing makes it easier to follow the message visually.
+
+\subsection{Message Encoding}
+The \texttt{morseCode()} function is basically a lookup table that converts characters to Morse code:
+\begin{itemize}
+    \item All 26 letters (A-Z)
+    \item All 10 digits (0-9)
+    \item Works with both uppercase and lowercase (converts everything to uppercase)
+    \item Handles spaces between words
+\end{itemize}
+
+The function returns a pointer to a string of dots and dashes. 
+Since these strings are constant, they're stored in flash memory instead of RAM, which saves memory.
+
+\subsection{Sequence Builder}
+The \texttt{buildSequence()} function creates the complete animation sequence:
+\begin{enumerate}
+    \item Goes through each character in the message
+    \item Converts to uppercase (so it's case-insensitive)
+    \item Looks up the Morse pattern (dots and dashes)
+    \item Breaks each dot/dash into individual LED steps for the wave effect
+    \item Adds the right timing gaps between symbols, letters, and words
+    \item Adds a reverse wave at the end for visual effect
+\end{enumerate}
+
+The sequence is stored in three arrays:
+\begin{itemize}
+    \item \texttt{durations[]}: How long each step lasts (in milliseconds)
+    \item \texttt{colors[]}: The RGB color for each step
+    \item \texttt{ledIndex[]}: Which LED to light (255 means all LEDs)
+\end{itemize}
+
+With \texttt{MAX\_STEPS} set to 100, this handles messages of about 10-15 characters. If you need longer messages, just increase MAX\_STEPS. 
+
+\subsection{Memory Management}
+Efficient memory usage is critical on microcontrollers with limited RAM. The ATmega328P has only 2 KB of SRAM, so careful planning was needed:
+
+\textbf{Flash vs. RAM Storage:}
+\begin{itemize}
+    \item The Morse lookup table uses string literals stored in flash memory (32 KB available) rather than RAM
+    \item The message string is also stored in flash using the \texttt{const char[]} declaration
+    \item Only the sequence arrays (\texttt{durations[]}, \texttt{colors[]}, \texttt{ledIndex[]}) occupy RAM during runtime
+\end{itemize}
+
+\textbf{RAM Usage Breakdown:}
+\begin{itemize}
+    \item \texttt{durations[100]}: 200 bytes (uint16\_t)
+    \item \texttt{colors[100]}: 400 bytes (uint32\_t)
+    \item \texttt{ledIndex[100]}: 100 bytes (uint8\_t)
+    \item LED strip object: ~150 bytes
+    \item Stack and other variables: ~200 bytes
+    \item \textbf{Total}: ~1050 bytes (52\% of available RAM)
+\end{itemize}
+
+This leaves enough headroom for future features while keeping the current implementation stable.
+
+\subsection{Lighthouse Wave Effect}
+Instead of just turning all LEDs on/off together, I implemented a lighthouse wave effect where the light sweeps across the strip:
+\begin{enumerate}
+    \item The dot or dash duration is split equally among the 8 LEDs
+    \item LEDs light up one after another from position 0 to 7
+    \item \texttt{WAVE\_WIDTH} controls how many neighboring LEDs light up at once
+    \item Boundary checking keeps the indices from wrapping around the strip
+\end{enumerate}
+
+For example, a 500 ms dot divided by 8 LEDs means each LED stays on for 62.5 ms. 
+This creates a smooth sweeping effect that looks much better than simple blinking. 
+The standard blinking without the lighthouse effect is supported as well by setting \texttt{WAVE\_WIDTH = 0}. 
+
+\subsection{Timer1 Configuration}
+Timer1 is the 16-bit hardware timer that handles all the timing. Here's how it's configured:
+
+\textbf{Mode:}
+\begin{itemize}
+    \item CTC (Clear Timer on Compare Match) mode using the \texttt{WGM12} bit
+    \item The timer automatically resets when it reaches the \texttt{OCR1A} value
+    \item This lets us generate precise, repeating time intervals
+\end{itemize}
+
+\textbf{Prescaler:}
+\begin{itemize}
+    \item Set to 1024 (using \texttt{CS12} and \texttt{CS10} bits)
+    \item This divides the 16 MHz clock: $16\text{ MHz} / 1024 = 15625\text{ Hz}$
+    \item Each timer tick is $64\mu s$
+    \item Maximum interval possible: $65536 \times 64\mu s \approx 4.19\text{ s}$
+\end{itemize}
+
+\textbf{Calculation:}
+To get the right number of timer ticks for a duration:
+$$\text{ticks} = \frac{\text{duration}_{\text{ms}} \times 15625}{1000}$$
+
+This value goes into \texttt{OCR1A}, and the interrupt fires when the timer counter (\texttt{TCNT1}) matches it.
+
+\subsection{Interrupt Service Routine}
+The \texttt{ISR(TIMER1\_COMPA\_vect)} function runs every time Timer1 triggers. It does:
+\begin{enumerate}
+    \item \textbf{LED Update}: Sets the color and position for the current animation step
+    \item \textbf{Wave Effect}: Figures out which LEDs to light for the lighthouse effect
+    \item \textbf{Display}: Calls \texttt{led\_strip.show()} to send the data to the LEDs
+    \item \textbf{Timer Reload}: Calculates and sets \texttt{OCR1A} for the next interval
+    \item \textbf{Next Step}: Moves to the next step (loops back to start when done)
+\end{enumerate}
+
+\textbf{Timing Impact:}
+The WS2812B needs precise bit timing ($1.25\mu s$ per bit, 24 bits per LED). For 8 LEDs, \texttt{show()} takes about $240\mu s$. Since the shortest Morse interval is 500 ms, this $240\mu s$ overhead is only 0.05\% and doesn't affect accuracy.
+
+\subsection{EEPROM State Management}
+The EEPROM is used to remember whether the system should be on or off across power cycles. Byte address 0 stores:
+\begin{itemize}
+    \item \textbf{Value 0}: System stopped
+    \item \textbf{Value 1}: System playing
+\end{itemize}
+
+\textbf{How it works:}
+When you press reset, the \texttt{setup()} function:
+\begin{enumerate}
+    \item Reads the current state from EEPROM
+    \item Flips it (on becomes off, off becomes on)
+    \item Writes the new state back (only if it changed)
+    \item Shows the startup or shutdown light sequence
+\end{enumerate}
+
+\textbf{Protecting EEPROM:}
+EEPROM can only handle about 100,000 writes before wearing out. To avoid wasting writes, the code only writes to EEPROM when the value actually changes.
+
+\subsection{Visual Feedback Sequences}
+The system provides visual confirmation of state transitions:
+
+\textbf{Startup Sequence:}
+Red (500 ms) $\rightarrow$ Green (500 ms) $\rightarrow$ Off (500 ms) $\rightarrow$ Begin transmission
+
+\textbf{Shutdown Sequence:}
+Green (500 ms) $\rightarrow$ Red (500 ms) $\rightarrow$ Off $\rightarrow$ Stay off
+
+These sequences provide immediate feedback about the system state and help debug power or timing issues.
+
+\subsection{Implementation Challenges}
+Several technical challenges came up during development:
+
+\textbf{WS2812B Timing Conflicts:}
+The WS2812B protocol requires very precise timing (within $\pm150ns$). Initially, I worried that calling \texttt{show()} inside an ISR might cause timing conflicts or jitter. However, since the shortest Morse interval (500 ms) is much longer than the LED update time ($240\mu s$), this wasn't an issue in practice.
+
+\textbf{Array Bounds Checking:}
+Early versions occasionally had LEDs lighting up at wrong positions due to integer overflow in the wave effect calculation. Adding explicit boundary checks (\texttt{if (ledPos >= 0 \&\& ledPos < LED\_COUNT)}) fixed this completely.
+
+\textbf{EEPROM Wear:}
+The original design wrote to EEPROM on every reset. Since EEPROM has limited write cycles, I added a check to only write when the value actually changes. This simple optimization extended the theoretical lifespan from a few months (assuming 100 resets/day) to over 270 years.
+
+\textbf{Timer Overflow:}
+When calculating timer ticks, I initially used 16-bit arithmetic which caused overflow for longer intervals. Switching to 32-bit arithmetic (\texttt{uint32\_t}) for the intermediate calculation solved this: \texttt{((uint32\_t)durations[currentStep] * TICKS\_PER\_SECOND) / 1000UL}.
+
+\section{Testing and Validation}
+
+\subsection{Timing Accuracy}
+Timer1 with a 1024 prescaler provides timing resolution of $64\mu s$ per tick. For a 500 ms dot:
+$$\text{Error} = \frac{64\mu s}{500\text{ ms}} = 0.0128\%$$
+
+This precision far exceeds human perception thresholds, ensuring imperceptible timing drift even over extended operation.
+
+\subsection{Message Verification}
+I tested the system with several different messages:
+\begin{itemize}
+    \item \textbf{"IN"}: Simple two-letter example (shown in the video)
+    \item \textbf{"SOS"}: The classic emergency signal (... --- ...)
+    \item \textbf{"SAMUEL MORSE"}: A longer word to test letter and word spacing
+\end{itemize}
+
+All messages encoded correctly with the right timing.
+
+\subsection{State Persistence}
+Reset button functionality was verified through multiple power cycles:
+\begin{enumerate}
+    \item Initial state: Stopped
+    \item First reset: Starts playing
+    \item Second reset: Stops playing
+    \item Third reset: Resumes playing
+    \item ...
+\end{enumerate}
+
+EEPROM state correctly persisted across power disconnections, confirming non-volatile storage functionality.
+
+\subsection{Wave Effect Variations}
+I tested the lighthouse effect with different \texttt{WAVE\_WIDTH} values:
+\begin{itemize}
+    \item \textbf{WAVE\_WIDTH = 0}: Standard mode - all LEDs on/off together
+    \item \textbf{WAVE\_WIDTH = 1}: Single LED sweeps across (narrow beam)
+    \item \textbf{WAVE\_WIDTH = 3}: Three LEDs illuminate (medium beam)
+    \item \textbf{WAVE\_WIDTH = 5}: Five LEDs illuminate (wide beam) - default setting
+    \item \textbf{WAVE\_WIDTH = 7}: Very wide beam, almost fills the entire strip
+\end{itemize}
+
+The WAVE\_WIDTH = 5 setting provided the best balance between visual smoothness and distinctiveness of the sweeping effect.
+
+This confirms the implementation is stable for extended operation, as would be expected from an interrupt-driven design.
+
+\section{Alternative Approaches}
+
+\subsection{Software vs. Hardware Timing}
+An alternative implementation could use software delays (\texttt{delay()}) instead of interrupts:
+\begin{itemize}
+    \item \textbf{Pros}: Simpler code and easier to understand. Furthermore, this approach would also allow for a nice pulsing mechanism, to slowly tune the intensity of each LED up and down again. 
+    \item \textbf{Cons}: Blocks the main loop, prevents multitasking, less accurate timing
+\end{itemize}
+
+The interrupt approach was mainly chosen because it keeps the main loop free and provides deterministic timing regardless of other code execution.
+Besides, this course is about Embedded Systems, so using Hardware Timers or Interrupts is mandatory. 
+
+\subsection{Alternative LED Technologies}
+Other LED options considered:
+\begin{itemize}
+    \item \textbf{Standard LEDs}: Much simpler to control, but no individual addressing or color control
+    \item \textbf{APA102}: Similar to WS2812B but with separate clock/data lines, more forgiving timing
+    \item \textbf{LED Matrix}: Could display actual text, but significantly more complex
+\end{itemize}
+
+WS2812B was chosen for its balance of capability (RGB, individual control) and simplicity (single data line).
+
+\subsection{Message Input Methods}
+For dynamic message input, several options exist:
+\begin{itemize}
+    \item \textbf{Serial Interface}: Simple text input via USB
+    \item \textbf{Bluetooth}: Wireless control from smartphone
+    \item \textbf{SD Card}: Store multiple pre-recorded messages
+    \item \textbf{Physical Keyboard}: Matrix keypad for standalone operation
+\end{itemize}
+
+The current compile-time message was chosen for simplicity, but adding serial input would be straightforward (see Section \ref{sec:Enhancements}).
+
+\section{Discussion}
+
+\subsection{Limitations}
+Current limitations include:
+\begin{itemize}
+    \item Fixed message stored in program memory (requires recompilation to change)
+    \item Limited to 100 steps (approximately 10-15 characters), but limit can be increased. 
+    \item No real-time input mechanism
+    \item Unidirectional communication (transmit only)
+    \item No error detection or correction
+\end{itemize}
+
+\subsection{Future Enhancements}\label{sec:Enhancements}
+Cool improvements that could benefit this project include:
+\begin{itemize}
+    \item Serial interface for dynamic message input
+    \item Multiple color schemes for different message types
+    \item Variable speed control via potentiometer
+    \item Sound output via piezo buzzer
+    \item Message recording and playback from EEPROM
+    \item A full setup with multiple devices (at least two), where each has at least
+    \begin{itemize}    
+        \item All features described in this project, plus
+        \item External input keyboard
+        \item Photodiode receiver for receiving signals
+        \item Function to translate incomming morse signals to strings
+        \item Display to show message string
+    \end{itemize}
+    \item[] would allow users to exchange morse messages in bidirecton. 
+\end{itemize}
+
+\subsection{Lessons Learned}
+This project provided valuable insights into embedded systems development:
+
+\textbf{Plan for Interrupts Early:}
+Deciding to use interrupts from the start simplified the architecture. Retrofitting interrupt support into a \texttt{delay()}-based design would have been much harder.
+
+\textbf{Document Timing Requirements:}
+Keeping clear notes on timing requirements (WS2812B protocol, Morse code standards, ISR execution time) helped avoid conflicts and made debugging easier.
+
+\textbf{Test Incrementally:}
+Building the project in stages (basic LED control $\rightarrow$ timer interrupts $\rightarrow$ Morse encoding $\rightarrow$ wave effect) made it easier to isolate bugs. Each stage worked before adding the next feature.
+
+\textbf{Memory is Limited:}
+The ATmega328P's 2 KB RAM seems like a lot until you start using arrays. Planning memory usage upfront and using flash storage for constants was essential.
+
+\textbf{Comments Matter:}
+Documenting the code with Doxygen-style comments helped me understand my own code when debugging issues days later. The time spent writing comments was worth it.
+
+\section{Conclusion}
+This project successfully implements an interrupt-driven Morse code transmitter with visual output. 
+It demonstrates several important embedded systems concepts: hardware timer configuration, interrupt service routines, non-volatile memory management, and addressable LED control.
+
+Using Timer1 in CTC mode keeps the timing accurate regardless of what else the program is doing. 
+The EEPROM state management gives a simple way to toggle on/off using just the reset button. 
+The lighthouse wave effect makes it visually interesting and shows precise control over individual LEDs.
+
+Main accomplishments:
+\begin{itemize}
+    \item Very accurate timing (sub-millisecond precision)
+    \item Clean, modular code that's easy to extend
+    \item Efficient use of memory
+    \item An empty main loop
+\end{itemize}
+
+This project is a good foundation for learning about real-time embedded systems and could could be easily extended with features described in \ref{sec:Enhancements}. 
+
+\section*{Declaration of AI Usage}
+I hereby declare that I used AI tools to assist in the generation of code and text for this project. However, I have reviewed and verified all content and take responsibility for the accuracy and integrity of this report and the associated software to the same extent as if I had written it entirely myself.
+
+\onecolumn
+\section{Appendix: Code}\label{sec:appendix_code}
+\lstinputlisting{../morse.ino}
+
+
+\end{document}
