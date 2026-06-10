@@ -2,6 +2,9 @@
 
 An interrupt-driven visual Morse code transmitter built with an Arduino Nano (ATmega328P) and a WS2812B LED strip. The project converts text messages into Morse code and displays them using a sweeping lighthouse-style wave effect across the LEDs.
 
+<video src="morse.mp4" width="100%" autoplay loop muted playsinline>
+</video>
+
 ## Features
 
 * **Interrupt-Driven Timing**: Uses hardware Timer1 for highly precise timing intervals, leaving the main `loop()` completely empty.
